@@ -47,14 +47,16 @@ def prepare_features(df, group_excl):
     return df.loc[~df.consumer_group.isin(group_excl),columns]
 
 
-def sample_features(df, sample_period='2H'):
+def sample_features(df, sample_period='H'):
     
     ''' Resample to smooze time series.
-        Drop rows with NA values.
     
     '''
-	
-    return df.set_index(['host','consumer_group']).groupby(level=['host','consumer_group']).apply(lambda c: c.set_index(pd.DatetimeIndex(c['time'])).resample(sample_period).mean()).reset_index().dropna()
+    #df=df.groupby(['host','consumer_group',df.index.date]).filter(lambda x: (x.index.min().hour==0)&(x.index.max().hour==23)).reset_index()
+    #df_sample = df.set_index(['host','consumer_group']).groupby(level=['host','consumer_group']).apply(lambda c: c.set_index(pd.DatetimeIndex(c['time'])).resample(sample_period).agg(['quantile'])).reset_index().dropna()
+    #df_sample.columns = ['time','host','consumer_group'] + ['_'.join(col).strip() for col in df_sample.columns.values if col[0] not in ['host','time','consumer_group']]
+
+    return df.groupby(['host', 'consumer_group', pd.Grouper(key='time', freq=sample_period)]).quantile(0.75).reset_index()
 
 
 def scale_features(df):
@@ -113,6 +115,9 @@ def dummy_features(df):
     
     return df_dummy
 
+def lag_features(df):
+    
+    return df
 
 if __name__ == "__main__":
     
@@ -123,9 +128,10 @@ if __name__ == "__main__":
     df = df_grpMetrics.set_index(['host','snap_id','consumer_group'])         .join(df_directives.set_index(['host','snap_id','consumer_group']))        .reset_index()        .merge(df_sysMetrics,on=['host','snap_id'])
         
     df = prepare_features(df, group_excl=['other_groups','ods2exa_group'])
-    df = sample_features(df, sample_period='2H')
+    df = sample_features(df, sample_period='H')
     df = scale_features(df)
     #df = dummy_features(df)
+    df = lag_features(df)
     
     out_name = 'rm_features.csv'
     out_dir = 'clear_data'
