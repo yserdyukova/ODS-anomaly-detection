@@ -42,7 +42,10 @@ def prepare_features(df, group_excl):
 
     columns = df.columns.drop(['snap_id','plan_name','max_utilization_limit', 
                          'mgmt_p1', 'parallel_degree_limit_p1', 'parallel_target_percentage','pxenq',
-                         'sys_dbtime','sys_actsess_avg'],errors='ignore')
+                         'sys_dbtime','sys_actsess_avg'#,
+                         #'sys_iowait', 'sys_oswait', 'sys_pxruns', 'sys_pxsrvt', 'sys_pxqct', 'dbtime', 'pxrel', 'read', 'sys_cpu', 'sys_pga', 'sys_read', 'sys_redo', 'sys_syspct', 'sys_ucalls', 'sys_write', 'write'
+                              ],errors='ignore')
+    
 
     return df.loc[~df.consumer_group.isin(group_excl),columns]
 
@@ -95,23 +98,23 @@ def dummy_features(df):
     
     df_dummy=df.copy(deep=True)
     
-    df_dummy.loc[:, ('day_of_week')] = df_dummy.time.dt.dayofweek
-    df_dummy.loc[:, ('hour_of_day')] = df_dummy.time.dt.hour
+    #df_dummy.loc[:, ('day_of_week')] = df_dummy.time.dt.dayofweek
+    #df_dummy.loc[:, ('hour_of_day')] = df_dummy.time.dt.hour
     #df_dummy.loc[:, ('is_weekend')] = df_dummy.time.dt.dayofweek.isin([5,6])*1
-    df_dummy.loc[:, ('week_of_month')] = (df_dummy.time.dt.day - 1)//7 + 1
+    #df_dummy.loc[:, ('week_of_month')] = (df_dummy.time.dt.day - 1)//7 + 1
     #df_dummy.loc[:,('month_of_year')]=df_dummy.time.dt.month
     #df_dummy.loc[:,('quarter_of_year')]=df_dummy.time.dt.quarter
-    df_dummy.loc[:,('day_of_month')] = df_dummy.time.dt.day
+    #df_dummy.loc[:,('day_of_month')] = df_dummy.time.dt.day
     
     df_dummy['date'] = pd.to_datetime(df_dummy.time.dt.strftime('%Y-%m-%d'))
     df_dummy = df_dummy.merge(holidays,on='date', how='left').drop(columns=['date'])
     df_dummy.loc[:, ('is_holiday')].fillna(0, inplace=True)
 
-    dummy_columns = ['host', 'consumer_group', 'hour_of_day', 'day_of_week', 'day_of_month', 'week_of_month']
-    df_dummy = pd.concat([df_dummy[['host', 'consumer_group']], pd.get_dummies(df_dummy.astype(str),
-                             columns=dummy_columns,
-                             prefix=dummy_columns,
-                             drop_first=True)], axis=1, sort=False)
+    #dummy_columns = ['host', 'consumer_group']
+    #df_dummy = pd.concat([df_dummy[['host', 'consumer_group']], pd.get_dummies(df_dummy.astype(str),
+    #                         columns=dummy_columns,
+    #                         prefix=dummy_columns,
+    #                         drop_first=True)], axis=1, sort=False)
     
     return df_dummy
 
@@ -121,14 +124,14 @@ def lag_features(df):
 
 if __name__ == "__main__":
     
-    df_sysMetrics = process_files(file_to_df('input/GrpStat_OSGLOB*.dat'), drop_columns=['time'])
-    df_grpMetrics = process_files(file_to_df('input/GrpStat_RGALL*.dat'), drop_columns=['t_beg'], rename_columns={"instance_number": "host", "usr_group": "consumer_group"})
-    df_directives = process_files(file_to_df('input/GrpStat_Directives*.dat', time_list=['begin_time']), rename_columns={"instance_number": "host", "begin_time": "time"})
+    #df_sysMetrics = process_files(file_to_df('input/GrpStat_OSGLOB*.dat'), drop_columns=['time'])
+    #df_grpMetrics = process_files(file_to_df('input/GrpStat_RGALL*.dat'), drop_columns=['t_beg'], rename_columns={"instance_number": "host", "usr_group": "consumer_group"})
+    #df_directives = process_files(file_to_df('input/GrpStat_Directives*.dat', time_list=['begin_time']), rename_columns={"instance_number": "host", "begin_time": "time"})
 
     df = df_grpMetrics.set_index(['host','snap_id','consumer_group'])         .join(df_directives.set_index(['host','snap_id','consumer_group']))        .reset_index()        .merge(df_sysMetrics,on=['host','snap_id'])
         
     df = prepare_features(df, group_excl=['other_groups','ods2exa_group'])
-    df = sample_features(df, sample_period='H')
+    df = sample_features(df, sample_period='3H')
     df = scale_features(df)
     #df = dummy_features(df)
     df = lag_features(df)

@@ -6,63 +6,62 @@ import itertools
 import colorlover as cl
 import random
 import plotly.graph_objs as go
+import sys
 
 from datetime import datetime, timedelta, date
 from collections import defaultdict
 from sklearn.ensemble import IsolationForest
 from plotly.offline import init_notebook_mode, plot, iplot
 
-from keras.layers import Input, Dense
+from keras.layers import Input, Dense, Lambda
 from keras.models import Model
 from keras import regularizers
 from keras.callbacks import EarlyStopping
+from keras import backend as K
 
 import matplotlib.pyplot as plt
 get_ipython().run_line_magic('matplotlib', 'inline')
 init_notebook_mode(connected=True)
 
-def predict(model, X):
+
+def rmse(predictions, targets):
+    return np.sqrt(((predictions - targets) ** 2).mean(axis=1))
+
+def mse(predictions, targets):
+    return((predictions - targets) ** 2).mean(axis=1)
+
+def mae(predictions, targets):
+    return (abs(predictions - targets)).mean(axis=1)
+
+def noise_autoencoder(X, noise=0, repeat=3):
     
-    model_predict = pd.DataFrame()
-    host_cons = [(host,group) for host,group in X.drop_duplicates(['host', 'consumer_group'])[['host', 'consumer_group']].values]
+    dim = X.shape[1]    
     
-    for (host,consumer_group) in host_cons:
-        sample = X[(X.host == host) & (X.consumer_group == consumer_group)].set_index(['time', 'host', 'consumer_group'])
-        predict = model.fit(sample).predict(sample)        
-        model_predict = pd.concat([model_predict, pd.DataFrame(predict, columns=['is_anomaly'])], sort=False)
-        
-    return pd.concat([X[['time','host','consumer_group']], model_predict.reset_index(drop=True)], axis=1, sort=False)
-
-
-def autoencoder_predict(X, noise=0):
-
-    dim = X.shape[1]
+    X_real = np.repeat(X, repeat, axis=0)
+    noise_array = noise * np.random.normal(loc=0.0, scale=1.0, size=[X.shape[0] * 3, X.shape[1]])
+    X_noise = np.clip(X_real + noise_array, 0, 1)
     
     X_input = Input(shape=(dim,))
-    encoded = Dense(64, activation='relu', activity_regularizer=regularizers.l1(10e-5))(X_input)
-    encoded = Dense(32, activation='relu')(encoded)
-    decoded = Dense(64, activation='relu')(encoded)
+    encoded = Dense(128, activation='relu')(X_input)
+    encoded = Dense(64, activation='linear', activity_regularizer=regularizers.l1(10e-5))(encoded)
+    decoded = Dense(128, activation='relu')(encoded)
     decoded = Dense(dim, activation='sigmoid')(decoded)
     
     autoencoder = Model(X_input, decoded)
-    autoencoder.compile(optimizer='adam', loss='mse')
+    autoencoder.compile(optimizer='adam', loss='mean_squared_error')
     
     earlystopper = EarlyStopping(monitor='val_loss', patience=5)
-    autoencoder.fit(X + np.clip(noise * np.random.normal(loc=0.0, scale=1.0, size=dim),0,1), 
-                    X,
+    autoencoder.fit(X_noise, 
+                    X_real,
                     epochs=1000,
                     batch_size=128,
                     shuffle=True,
                     validation_split=0.2,
                     verbose=0,
                     callbacks=[earlystopper])
-    autoencoder_predict = autoencoder.predict(X)
-    
-    rmse = pd.DataFrame(np.sqrt(np.mean(np.power(X.values - autoencoder_predict, 2), axis=1)),columns=['rmse'])
-    mse = pd.DataFrame(np.mean(np.power(X.values - autoencoder_predict, 2), axis=1),columns=['mse'])
-    error_ae = pd.concat([X.reset_index()[['time','host','consumer_group']], rmse, mse],axis=1,sort=False)
-    
-    return error_ae
+
+    return autoencoder.predict(X)
+
 
 def show_forecast(X, metrics, consumer_group, anomaly=None):
     ''' Visualization function
@@ -92,6 +91,7 @@ def show_forecast(X, metrics, consumer_group, anomaly=None):
             visible=ButtonVisible
         ) for i in range(len(anomaly[anomaly.host==host]))]
         
+           
         # фактические значения
         for j,metric in enumerate(metrics):
             
@@ -111,6 +111,8 @@ def show_forecast(X, metrics, consumer_group, anomaly=None):
             colorpal=random.randint(0,len(colors)-1)
             fact_data.append(go.Scatter(
                 name=str(metric),
+                #legendgroup=str(metric),     
+                #showlegend= False,
                 x=X[X.host==host].time,
                 y=X[X.host==host][metric].values,
                 mode='lines',
@@ -173,27 +175,27 @@ def show_forecast(X, metrics, consumer_group, anomaly=None):
                       zeroline=False
                   ),
                  )
-
     return dict(data=list(itertools.chain.from_iterable([value for key,value in data_host.items()])), layout=layout)
 
 if __name__ == "__main__":
     
     df = pd.read_csv('../features/clear_data/rm_features.csv', ';', infer_datetime_format=True, parse_dates=['time'])
-    outliers_fraction = 0.015
-
-    # IsolationForest
-    model_IF = IsolationForest(contamination=outliers_fraction, n_estimators=500, bootstrap=True)
-    IF_predict = predict(model_IF, df)
+    X = df.set_index(['time', 'host', 'consumer_group'])
 
     # AutoEncoder
-    ae_predict = autoencoder_predict(df.set_index(['time','host','consumer_group']), 0.2)
-    quantile = ae_predict.mse.quantile(1-outliers_fraction)
+    autoencoder_predict = noise_autoencoder(X.values, 0.2)
+    autoencoder_error = pd.concat([X.reset_index()[['time','host','consumer_group']], pd.DataFrame(mse(autoencoder_predict, X.values), columns=['error'])], axis=1, sort=False)
+    outliers_fraction = 0.015
+    autoencoder_error['quantile_error'] = autoencoder_error.groupby(['host','consumer_group'])['error'].transform(lambda x: x.quantile(1 - outliers_fraction))
     
-    anomaly_predict = ae_predict[ae_predict.mse > quantile].set_index(['time', 'host', 'consumer_group']).join(IF_predict[IF_predict.is_anomaly == -1].set_index(['time', 'host', 'consumer_group']),how='inner').reset_index()
-
-    consumer_group = 'szb_sandbox_group'
-    fig_reqs = show_forecast(df[df.consumer_group == consumer_group], df.drop(columns=['time','host','consumer_group']).columns, consumer_group, anomaly_predict[anomaly_predict.consumer_group == consumer_group])
-
-    plot(fig_reqs, filename='../results/report.html')
+    anomaly_predict = autoencoder_error.query('error > quantile_error')
+    plt.plot(autoencoder_error[['time']], autoencoder_error[['error']], '*')
+    plt.xticks(rotation='vertical')  
     
+    # Visualization
+    for consumer_group in anomaly_predict.consumer_group.unique():
+        fig_reqs = show_forecast(X.query('consumer_group == @consumer_group').reset_index(), X.columns, consumer_group, anomaly_predict[anomaly_predict.consumer_group == consumer_group])
+        #iplot(fig_reqs)
+
+        plot(fig_reqs, filename='../results/report_{0}.html'.format(consumer_group))
 
