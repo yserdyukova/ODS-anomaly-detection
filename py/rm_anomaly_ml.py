@@ -1,45 +1,65 @@
-#!/usr/bin/env python3
+#!$CONDA_PYTHON_EXE
 
 import pandas as pd
 import numpy as np
 import itertools
 import colorlover as cl
 import random
-import plotly.graph_objs as go
 import sys
 
 from datetime import datetime, timedelta, date
 from collections import defaultdict
 from sklearn.ensemble import IsolationForest
 from plotly.offline import init_notebook_mode, plot, iplot
+from plotly import graph_objs as go
 
-from keras.layers import Input, Dense, Lambda
+from keras.layers import Input, Dense
 from keras.models import Model
 from keras import regularizers
 from keras.callbacks import EarlyStopping
-from keras import backend as K
-
-import matplotlib.pyplot as plt
-get_ipython().run_line_magic('matplotlib', 'inline')
-init_notebook_mode(connected=True)
 
 
 def rmse(predictions, targets):
+
     return np.sqrt(((predictions - targets) ** 2).mean(axis=1))
 
+	
 def mse(predictions, targets):
+
     return((predictions - targets) ** 2).mean(axis=1)
 
+	
 def mae(predictions, targets):
+
     return (abs(predictions - targets)).mean(axis=1)
 
-def noise_autoencoder(X, noise=0, repeat=3):
-    
-    dim = X.shape[1]    
+
+def noise_repeat(X, noise=0.2, repeat=5):
     
     X_real = np.repeat(X, repeat, axis=0)
-    noise_array = noise * np.random.normal(loc=0.0, scale=1.0, size=[X.shape[0] * 3, X.shape[1]])
+    noise_array = noise * np.random.normal(loc=0.0, scale=1.0, size=[X.shape[i] * repeat if i == 0 else X.shape[i] if i == 1 else 1 for i in range(len(X.shape))])
     X_noise = np.clip(X_real + noise_array, 0, 1)
+    
+    return X, X_real, X_noise
+
+
+def autoencoder_fit(X_predict, X_real, X_noise, model, verbose=0):
+    
+    model.compile(optimizer='adam', loss='mean_squared_error')
+    earlystopper = EarlyStopping(monitor='val_loss', patience=3)
+    model.fit(X_noise, 
+                    X_real,
+                    epochs=1000,
+                    batch_size=128,
+                    shuffle=True,
+                    validation_split=0.2,
+                    verbose=verbose,
+                    callbacks=[earlystopper])
+    
+    return model.predict(X_predict)
+
+
+def noise_autoencoder(dim):
     
     X_input = Input(shape=(dim,))
     encoded = Dense(128, activation='relu')(X_input)
@@ -49,18 +69,8 @@ def noise_autoencoder(X, noise=0, repeat=3):
     
     autoencoder = Model(X_input, decoded)
     autoencoder.compile(optimizer='adam', loss='mean_squared_error')
-    
-    earlystopper = EarlyStopping(monitor='val_loss', patience=5)
-    autoencoder.fit(X_noise, 
-                    X_real,
-                    epochs=1000,
-                    batch_size=128,
-                    shuffle=True,
-                    validation_split=0.2,
-                    verbose=0,
-                    callbacks=[earlystopper])
 
-    return autoencoder.predict(X)
+    return autoencoder
 
 
 def show_forecast(X, metrics, consumer_group, anomaly=None):
@@ -177,25 +187,24 @@ def show_forecast(X, metrics, consumer_group, anomaly=None):
                  )
     return dict(data=list(itertools.chain.from_iterable([value for key,value in data_host.items()])), layout=layout)
 
-if __name__ == "__main__":
-    
-    df = pd.read_csv('../features/clear_data/rm_features.csv', ';', infer_datetime_format=True, parse_dates=['time'])
-    X = df.set_index(['time', 'host', 'consumer_group'])
 
-    # AutoEncoder
-    autoencoder_predict = noise_autoencoder(X.values, 0.2)
+if __name__ == "__main__":
+
+    df = pd.read_csv('../features/clear_data/rm_features.csv', ';', infer_datetime_format=True, parse_dates=['time'])
+
+    # Noise AutoEncoder
+    X = df.set_index(['time', 'host', 'consumer_group'])
+    X_predict, X_real, X_noise = noise_repeat(X.values)
+    noise_model = noise_autoencoder(X_predict.shape[1])
+    autoencoder_predict = autoencoder_fit(X_predict, X_real, X_noise, noise_model, verbose=0)
     autoencoder_error = pd.concat([X.reset_index()[['time','host','consumer_group']], pd.DataFrame(mse(autoencoder_predict, X.values), columns=['error'])], axis=1, sort=False)
-    outliers_fraction = 0.015
-    autoencoder_error['quantile_error'] = autoencoder_error.groupby(['host','consumer_group'])['error'].transform(lambda x: x.quantile(1 - outliers_fraction))
-    
-    anomaly_predict = autoencoder_error.query('error > quantile_error')
-    plt.plot(autoencoder_error[['time']], autoencoder_error[['error']], '*')
-    plt.xticks(rotation='vertical')  
+   
+    autoencoder_error['is_anomaly'] =         autoencoder_error.groupby(['host','consumer_group'])['error'].transform(lambda x: np.abs(x - x.mean()) > 3 * x.std())
+
+    anomaly_predict = autoencoder_error[autoencoder_error.is_anomaly == True]
     
     # Visualization
     for consumer_group in anomaly_predict.consumer_group.unique():
         fig_reqs = show_forecast(X.query('consumer_group == @consumer_group').reset_index(), X.columns, consumer_group, anomaly_predict[anomaly_predict.consumer_group == consumer_group])
-        #iplot(fig_reqs)
-
         plot(fig_reqs, filename='../results/report_{0}.html'.format(consumer_group))
 
