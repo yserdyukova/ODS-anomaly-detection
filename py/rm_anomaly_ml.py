@@ -1,5 +1,3 @@
-#!$CONDA_PYTHON_EXE
-
 import pandas as pd
 import numpy as np
 import itertools
@@ -18,20 +16,20 @@ from keras.models import Model
 from keras import regularizers
 from keras.callbacks import EarlyStopping
 
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+
 
 def rmse(predictions, targets):
-
     return np.sqrt(((predictions - targets) ** 2).mean(axis=1))
 
-	
 def mse(predictions, targets):
-
     return((predictions - targets) ** 2).mean(axis=1)
 
-	
 def mae(predictions, targets):
-
     return (abs(predictions - targets)).mean(axis=1)
+
 
 
 def noise_repeat(X, noise=0.2, repeat=5):
@@ -71,6 +69,8 @@ def noise_autoencoder(dim):
     autoencoder.compile(optimizer='adam', loss='mean_squared_error')
 
     return autoencoder
+
+
 
 
 def show_forecast(X, metrics, consumer_group, anomaly=None):
@@ -188,8 +188,31 @@ def show_forecast(X, metrics, consumer_group, anomaly=None):
     return dict(data=list(itertools.chain.from_iterable([value for key,value in data_host.items()])), layout=layout)
 
 
-if __name__ == "__main__":
 
+def dash_create(figure):
+
+    external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+
+    app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+
+    app.layout = html.Div(children=[
+        html.H1(children='Hello Dash'),
+
+        html.Div(children='''
+            Dash: A web application framework for Python.
+        '''),
+
+        dcc.Graph(
+            id='example-graph',
+            figure = figure
+        )
+    ])
+	
+    return app
+
+
+if __name__ == "__main__":
+    
     df = pd.read_csv('../features/clear_data/rm_features.csv', ';', infer_datetime_format=True, parse_dates=['time'])
 
     # Noise AutoEncoder
@@ -199,12 +222,20 @@ if __name__ == "__main__":
     autoencoder_predict = autoencoder_fit(X_predict, X_real, X_noise, noise_model, verbose=0)
     autoencoder_error = pd.concat([X.reset_index()[['time','host','consumer_group']], pd.DataFrame(mse(autoencoder_predict, X.values), columns=['error'])], axis=1, sort=False)
    
-    autoencoder_error['is_anomaly'] =         autoencoder_error.groupby(['host','consumer_group'])['error'].transform(lambda x: np.abs(x - x.mean()) > 3 * x.std())
+    autoencoder_error['is_anomaly'] = autoencoder_error.groupby(['host','consumer_group'])['error'].transform(lambda x: np.abs(x - x.mean()) > 3 * x.std())
 
     anomaly_predict = autoencoder_error[autoencoder_error.is_anomaly == True]
     
     # Visualization
-    for consumer_group in anomaly_predict.consumer_group.unique():
-        fig_reqs = show_forecast(X.query('consumer_group == @consumer_group').reset_index(), X.columns, consumer_group, anomaly_predict[anomaly_predict.consumer_group == consumer_group])
-        plot(fig_reqs, filename='../results/report_{0}.html'.format(consumer_group))
+    #for consumer_group in anomaly_predict.consumer_group.unique():
+        #fig_reqs = show_forecast(X.query('consumer_group == @consumer_group').reset_index(), X.columns, consumer_group, anomaly_predict[anomaly_predict.consumer_group == consumer_group])
+        #iplot(fig_reqs)
+
+        #plot(fig_reqs, filename='../results/report_{0}.html'.format(consumer_group))
+
+    consumer_group = 'szb_consumer_group'
+    fig_reqs = show_forecast(X.query('consumer_group == @consumer_group').reset_index(), X.columns, consumer_group, anomaly_predict[anomaly_predict.consumer_group == consumer_group])
+    
+    dash_create(fig_reqs).run_server(debug=True)
+	
 
