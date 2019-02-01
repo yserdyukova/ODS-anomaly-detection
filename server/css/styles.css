@@ -1,0 +1,48 @@
+.wrapper {
+	width: 100%;
+	margin: 0 auto;
+}
+
+.header {
+	clear: both;
+    padding-bottom: 20px;
+	height: 100%;
+	
+}
+
+.center {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  width: 50%;
+}
+
+.sidenav {
+	width: 15%;
+	float: left;
+	padding-top: 20px;
+}
+
+.sidenav a {
+	padding-left: 20px;
+	padding-right: 20px;
+  
+}
+ 
+.content {
+	width: 85%;
+	float: right;
+	padding-top: 20px;
+	position: relative;
+	overflow: hidden;
+	padding-top: 56.25%;
+}
+
+.resp-iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
