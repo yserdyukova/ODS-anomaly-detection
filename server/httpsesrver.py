@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/C/Users/JustMe/Anaconda3/python
 import http.server
 import socketserver
 
