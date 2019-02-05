@@ -10,7 +10,7 @@ from plotly import tools
 from datetime import datetime, timedelta, date
 from collections import defaultdict
 
-def show_forecast(X, metrics, consumer_group, showrange=False, anomaly=None):
+def show_forecast(X, columns, chart_obj, anomaly=None, by_group=True, trend=False):
     ''' Visualization function
     '''
 
@@ -43,7 +43,7 @@ def show_forecast(X, metrics, consumer_group, showrange=False, anomaly=None):
         
            
         # фактические значения
-        for j,metric in enumerate(metrics):
+        for j,column in enumerate(columns):
             
             dash='longdash'
             
@@ -60,11 +60,11 @@ def show_forecast(X, metrics, consumer_group, showrange=False, anomaly=None):
                 
             colorpal=random.randint(0,len(colors)-1)
             fact_data.append(go.Scatter(
-                name=str(metric),
+                name=str(column),
                 #legendgroup=str(metric),     
                 #showlegend= False,
-                x=X[X.host==host].time,
-                y=X[X.host==host][metric].values,
+                x = X[X.host == host].time if by_group == True else X[(X.host == host) & (X.consumer_group == column)].time,
+                y = X[X.host == host][column].values if by_group == True else X[(X.host == host) & (X.consumer_group == column)][chart_obj].values,
                 mode='lines',
                 line=dict(color=colors[colorpal][i+3],
                           dash=dash,
@@ -82,7 +82,7 @@ def show_forecast(X, metrics, consumer_group, showrange=False, anomaly=None):
         dict(label='Host '+str(hostname),
           method = 'update',
           args = [
-              {'visible':list(itertools.chain.from_iterable([([True]+(len(metrics)-1)*['legendonly']+(len(values)-len(metrics))*[True]) if host==hostname else len(values)*[False] for host,values in data_host.items()]
+              {'visible':list(itertools.chain.from_iterable([([True]+(len(columns)-1)*['legendonly']+(len(values)-len(columns))*[True]) if host==hostname else len(values)*[False] for host,values in data_host.items()]
           )) },
              ])
         for i,hostname in enumerate(hosts) 
@@ -91,12 +91,12 @@ def show_forecast(X, metrics, consumer_group, showrange=False, anomaly=None):
  ])
 
 	
-    layout = dict(title=consumer_group, 
+    layout = dict(title=chart_obj, 
                   showlegend=True,
                   updatemenus=updatemenus,
 
                   xaxis=dict(
-                      range=[X.time.max()-timedelta(days=7), X.time.max()] if showrange == True else None,
+                      range=[X.time.max()-timedelta(days=7), X.time.max()] if trend == False else None,
                       rangeselector=dict(
                           buttons=list([
                               dict(count=1,
