@@ -10,40 +10,41 @@ from plotly import tools
 from datetime import datetime, timedelta, date
 from collections import defaultdict
 
-def show_forecast(X, columns, chart_obj, anomaly=None, by_group=True, trend=False):
+def show_forecast(X, y, button_name_prefix, graph_name_prefix, chart_name, anomaly=None, timeinterval=None, date_range=None):
     ''' Visualization function
     '''
 
-    colors=[color for color in cl.flipper()['seq']['9'].values()]
-    data_host=defaultdict(list)
+    colors = [color for color in cl.flipper()['seq']['9'].values()]
+    data = defaultdict(list)
 
-    hosts=X.host.unique()
-    for i,host in enumerate(hosts):
-        fact_data=[]
-        if i==0: 
-            ButtonVisible=True
+    for i, value in enumerate([(key, value) for key, value in y.items()]):
+        button, dict_graphs = value
+        fact_data = []
+        if i == 0: 
+            ButtonVisible = True
         else: 
-            ButtonVisible=False
-
+            ButtonVisible = False
+		
+		# Аномальные значения
         if anomaly is None:
             anomaly_data = []
         else:
             anomaly_data = [go.Scatter(
-                x=[anomaly[anomaly.host==host].iloc[i].time,anomaly[anomaly.host==host].iloc[i].time+timedelta(hours=1)],
-                y=[1,1],
-                fill='tozeroy',
-                fillcolor='rgba(190,127,188,0.5)',
-                line=dict(width=0),
-                mode= 'none',
-                legendgroup='anomaly',
-                name='anomaly',
-                visible=ButtonVisible,
-                showlegend=True if i==0 else False
-            ) for i in range(len(anomaly[anomaly.host==host]))]
-        
-           
+                x = [anomaly[button][i], (anomaly[button][i] + timeinterval)[0]],
+                y = [1,1],
+                fill = 'tozeroy',
+                fillcolor = 'rgba(190,127,188,0.5)',
+                line = dict(width=0),
+                mode = 'none',
+                legendgroup = 'anomaly',
+                name = 'anomaly',
+                visible = ButtonVisible,
+                showlegend = True if i == 0 else False
+            ) for i in range(len(anomaly[button]))]
+
         # фактические значения
-        for j,column in enumerate(columns):
+        for j, value in enumerate([(key, value) for key, value in dict_graphs.items()]):
+            graph, list_values = value
             
             dash='longdash'
             
@@ -55,48 +56,53 @@ def show_forecast(X, columns, chart_obj, anomaly=None, by_group=True, trend=Fals
                 dash='dot'
 
             
-            if (ButtonVisible==True) & (j!=0): 
-                ButtonVisible='legendonly'
+            if (ButtonVisible == True) & (j != 0): 
+                ButtonVisible = 'legendonly'
                 
-            colorpal=random.randint(0,len(colors)-1)
+            colorpal = random.randint(0, len(colors) - 1)
+            colorintensity = random.randint(2, 8)
             fact_data.append(go.Scatter(
-                name=str(column),
-                #legendgroup=str(metric),     
-                #showlegend= False,
-                x = X[X.host == host].time if by_group == True else X[(X.host == host) & (X.consumer_group == column)].time,
-                y = X[X.host == host][column].values if by_group == True else X[(X.host == host) & (X.consumer_group == column)][chart_obj].values,
+                name=graph_name_prefix+str(graph),
+                x = X[button][graph],
+                y = y[button][graph],
                 mode='lines',
-                line=dict(color=colors[colorpal][i+3],
+                line=dict(color=colors[colorpal][colorintensity],
                           dash=dash,
                           width=2
                            ),
                 visible=ButtonVisible
                 )) 
 
-        data_host[host]=list(filter(None.__ne__,[*fact_data,*anomaly_data]))
-
+        data[button]=list(filter(None.__ne__,[*fact_data, *anomaly_data]))
+        
+    
     updatemenus = list([
     dict(type="buttons",
          x = -0.07,
          buttons=list([
-        dict(label='Host '+str(hostname),
+        dict(label=button_name_prefix + str(button),
           method = 'update',
           args = [
-              {'visible':list(itertools.chain.from_iterable([([True]+(len(columns)-1)*['legendonly']+(len(values)-len(columns))*[True]) if host==hostname else len(values)*[False] for host,values in data_host.items()]
+              {'visible':list(itertools.chain.from_iterable([([True]+
+                                                              (len(y[key])-1)*['legendonly']+
+                                                              (len(values)-len(y[key]))*[True]) 
+                                                             
+                                                             if key==button 
+                                                             else len(values)*[False] 
+                                                             for key, values in data.items()]
           )) },
              ])
-        for i,hostname in enumerate(hosts) 
+        for i, button in enumerate([key for key in y.keys()]) 
          ])
         )
  ])
 
-	
-    layout = dict(title=chart_obj, 
+    layout = dict(title=chart_name, 
                   showlegend=True,
                   updatemenus=updatemenus,
 
                   xaxis=dict(
-                      range=[X.time.max()-timedelta(days=7), X.time.max()] if trend == False else None,
+                      range = date_range,
                       rangeselector=dict(
                           buttons=list([
                               dict(count=1,
@@ -125,5 +131,7 @@ def show_forecast(X, columns, chart_obj, anomaly=None, by_group=True, trend=Fals
                       zeroline=False
                   ),
                  )
-    return dict(data=list(itertools.chain.from_iterable([value for key,value in data_host.items()])), layout=layout)
+
+    return dict(data=list(itertools.chain.from_iterable([value for key,value in data.items()])), layout=layout)
+
 
